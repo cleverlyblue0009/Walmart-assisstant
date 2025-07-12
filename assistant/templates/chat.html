@@ -1,0 +1,44 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Smart Assistant</title>
+    <link rel="stylesheet" href="{% static 'css/chat.css' %}">
+    <style>
+        .admin-button {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            background-color: #1e3c72;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .admin-button:hover {
+            background-color: #2a5298;
+        }
+    </style>
+</head>
+<body>
+    <!-- Admin button -->
+    <a href="{% url 'admin_login' %}" class="admin-button">🔐 Admin Login</a>
+
+    <div class="chat-wrapper">
+        <div class="chatbox" id="chatlogs">
+            <!-- Chat messages go here -->
+        </div>
+        <div class="chat-input">
+            <input type="text" id="userInput" placeholder="Ask me anything..." />
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script src="{% static 'js/chat.js' %}"></script>
+</body>
+</html>

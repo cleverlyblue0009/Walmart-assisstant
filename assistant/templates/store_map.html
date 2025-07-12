@@ -1,0 +1,44 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Store Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    #map {
+      height: 500px;
+      width: 90%;
+      margin: auto;
+      border: 2px solid #333;
+    }
+    .leaflet-popup-content {
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h2 style="text-align:center;">🗺️ Store Product Map</h2>
+  <div id="map"></div>
+
+  <script>
+    // Create map
+    var map = L.map('map', {
+      crs: L.CRS.Simple,
+      minZoom: -1
+    });
+
+    // Custom image as background
+    var bounds = [[0, 0], [500, 1000]];  // Adjust to your store-map image size
+    var image = L.imageOverlay("{% static 'images/store-map.png.jpg' %}", bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    // Add markers
+    {% for product in products %}
+      L.marker([{{ product.y_coord }}, {{ product.x_coord }}])
+        .addTo(map)
+        .bindPopup("<b>{{ product.name }}</b><br>₹{{ product.price }}<br>{{ product.location }}");
+    {% endfor %}
+  </script>
+</body>
+</html>
