@@ -2,21 +2,20 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.csrf import csrf_exempt
 from .forms import AdminRegisterForm, AdminLoginForm, ProductForm
 from .models import Product
 import google.generativeai as genai
+from PIL import Image
 import os
 from dotenv import load_dotenv
-import json
+from django.core.files.storage import default_storage
 
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 def chat_view(request):
     return render(request, "chat.html")
-for m in genai.list_models():
-    print(m.name, "supports", m.supported_generation_methods)
-
 
 # Function to format product info for the chatbot prompt
 def format_product_data():
@@ -27,23 +26,44 @@ def format_product_data():
         f"{p.name} - ₹{p.price}, Location: {p.location}" for p in products
     ])
 
-def generate_gpt_reply(user_input):
+def generate_gpt_reply(user_input=None, detected_label=None):
     product_info = format_product_data()
 
-    prompt = f"""
-You are a helpful and creative store assistant. Only respond with details relevant to the user's question.
+    if detected_label:
+        matching_product = Product.objects.filter(name__icontains=detected_label).first()
+        if matching_product:
+            product_fact = f"We have {matching_product.name} for ₹{matching_product.price} in {matching_product.location}."
+        else:
+            product_fact = f"We don't currently stock {detected_label}, but it's a wonderful choice!"
 
-Don't list all products by default.
+        prompt = f"""
+A customer uploaded a photo.
+It was detected as: "{detected_label}".
+
+Details:
+{product_fact}
+
+Instructions:
+- Respond in a short, warm tone.
+- If it's in our store, mention name, price, and location nicely.
+- If not, share a fun or helpful fact about the product.
+- Always ask if the customer needs anything else.
+"""
+    else:
+        prompt = f"""
+You are a helpful and creative store assistant.
 
 Here is internal product data for you to use if needed:
 {product_info}
 
 Instructions for replies:
+- Greet the customer if it's a greeting like "hi" or "hello".
 - Respond warmly and concisely.
 - Use short lines and bullet points using * or dashes.
 - Suggest products based on the user's interest.
-- Do NOT show all available products unless asked.
-- After each suggestion give some facts about the suggestion and ask if the customer needs something else.
+- Do not list all products unless explicitly asked.
+- If a product is not available, still give helpful information.
+- Always ask if the customer needs anything else.
 
 User: {user_input}
 Assistant:
@@ -52,21 +72,16 @@ Assistant:
     try:
         model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
         response = model.generate_content(prompt)
-
-        # Clean formatting for HTML display
-        formatted = (
-            response.text.replace('\n', '<br>')
-                         .replace('*', '•')
-                         .replace('- ', '• ')
-        )
+        formatted = "<br>".join([
+            line.strip() for line in response.text.replace('*', '•').replace('- ', '• ').split('\n') if line.strip()
+        ])
         return formatted
     except Exception as e:
         return f"Oops! I had a glitch trying to answer that 😅 ({str(e)})"
 
-
 def get_response(request):
     user_input = request.GET.get('msg', '').lower()
-    reply = generate_gpt_reply(user_input)
+    reply = generate_gpt_reply(user_input=user_input)
     return JsonResponse({"reply": reply})
 
 def admin_register(request):
@@ -101,8 +116,28 @@ def admin_dashboard(request):
         return redirect('admin_login')
 
     form = ProductForm()
-    products = Product.objects.all()
+    categories = Product.objects.values_list('category', flat=True).distinct()
 
+    context = {
+        'form': form,
+        'categories': categories,
+    }
+    return render(request, 'admin_dashboard.html', context)
+
+@login_required
+def view_category(request, category_name):
+    if not request.user.is_staff:
+        return redirect('admin_login')
+
+    products = Product.objects.filter(category=category_name)
+    return render(request, 'category_view.html', {'category': category_name, 'products': products})
+
+@login_required
+def add_or_edit_product(request):
+    if not request.user.is_staff:
+        return redirect('admin_login')
+
+    form = ProductForm()
     if request.method == 'POST':
         if 'add' in request.POST:
             form = ProductForm(request.POST)
@@ -116,7 +151,7 @@ def admin_dashboard(request):
                 form.save()
                 return redirect('admin_dashboard')
 
-    return render(request, 'admin_dashboard.html', {'form': form, 'products': products})
+    return render(request, 'admin_dashboard.html', {'form': form})
 
 @login_required
 def delete_product(request, product_id):
@@ -128,7 +163,28 @@ def delete_product(request, product_id):
 def admin_logout(request):
     logout(request)
     return redirect('admin_login')
+
 @login_required
 def store_map(request):
     products = Product.objects.all()
     return render(request, 'store_map.html', {'products': products})
+
+@csrf_exempt
+@login_required
+def analyze_image(request):
+    if request.method == 'POST' and request.FILES.get('image'):
+        img_file = request.FILES['image']
+        file_path = default_storage.save('uploads/' + img_file.name, img_file)
+
+        try:
+            image = Image.open(default_storage.path(file_path)).convert("RGB")
+            model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
+            response = model.generate_content(["What is in this image? Give only the name of the object.", image])
+            label = response.text.strip().split('\n')[0]
+        except Exception as e:
+            return JsonResponse({"reply": f"Gemini image analysis failed: {str(e)}"}, status=500)
+
+        reply = generate_gpt_reply(detected_label=label)
+        return JsonResponse({"reply": reply})
+
+    return JsonResponse({"reply": "No image provided."}, status=400)
